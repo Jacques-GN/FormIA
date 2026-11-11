@@ -1,11 +1,22 @@
-from app.main import create_app
+"""Tests de l'API Formia."""
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+# Le client de test simule un navigateur : il appelle l'API sans lancer le serveur.
+client = TestClient(app)
 
 
-def test_health_endpoint_returns_service_status() -> None:
-    app = create_app()
-    app.config["APP_NAME"] = "Test API"
-
-    response = app.test_client().get("/api/health")
+def test_home_returns_welcome_message():
+    response = client.get("/")
 
     assert response.status_code == 200
-    assert response.get_json() == {"status": "ok", "service": "Test API"}
+    assert response.json() == {"Message": "Bienvenue sur FormIA", "status": "online"}
+
+
+def test_health_endpoint_returns_healthy():
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
