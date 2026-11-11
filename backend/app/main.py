@@ -1,22 +1,11 @@
 from fastapi import FastAPI
 
-# creation de l'application FormIA
+from app.api.routes import router
+
 app = FastAPI(
-    title="FoamIA",
-    description="il sagit la d'un teste du backend",
-    version="0.1.0"
+    title="FormIA",
+    description="L'intelligence africaine, au service de vos idées.",
+    version="0.1.0",
 )
 
-@app.get("/")
-def accueil():
-    return{
-        "Message": "Bienvenue sur FormIA",
-        "status": "online"
-    }
-
-@app.get("/health")
-def health_check():
-    return{
-        "status": "healthy"
-    }
-    
+app.include_router(router)

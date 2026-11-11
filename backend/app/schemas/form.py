@@ -1,4 +1,4 @@
-"""Modèles de données de Formia : décrivent à quoi ressemble un formulaire valide."""
+"""Schémas Pydantic qui décrivent la structure d'un formulaire valide."""
 
 from enum import Enum
 
@@ -34,7 +34,7 @@ class Question(BaseModel):
     @model_validator(mode="after")
     def check_options_match_type(self):
         """Vérifie que les options sont cohérentes avec le type de question."""
-        
+
         if self.type in CHOICE_TYPES and len(self.options) < 2:
             raise ValueError("Une question à choix doit avoir au moins 2 options.")
         if self.type not in CHOICE_TYPES and self.options:

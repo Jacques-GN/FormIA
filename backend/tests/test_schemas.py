@@ -3,13 +3,13 @@
 import pytest
 from pydantic import ValidationError
 
-from app.Models import Form, Question, QuestionType
-
+from app.schemas.form import Form, Question, QuestionType
 
 # ---------- Cas qui doivent réussir ----------
 
+
 def test_text_question_is_valid():
-    question = Question(title="Nom complet", type=QuestionType.SHORT_TEXT )
+    question = Question(title="Nom complet", type=QuestionType.SHORT_TEXT)
     assert question.title == "Nom complet"
     assert question.required is False  # valeur par défaut
 
@@ -26,12 +26,13 @@ def test_choice_question_with_options_is_valid():
 def test_form_with_one_question_is_valid():
     form = Form(
         title="Inscription IA",
-        questions=[{"title": "Nom complet", "type": "short_text"}], 
+        questions=[{"title": "Nom complet", "type": "short_text"}],
     )
     assert form.title == "Inscription IA"
 
 
 # ---------- Cas qui doivent être refusés ----------
+
 
 def test_choice_question_without_options_is_refused():
     with pytest.raises(ValidationError):
