@@ -1,7 +1,6 @@
 """Tests du graphe d'orchestration des demandes de formulaires."""
 
 import pytest
-from pydantic import BaseModel
 
 from app.agents import nodes
 from app.agents.orchestrator import orchestrate_form_request
@@ -28,7 +27,7 @@ def test_orchestrator_validates_and_runs_generation(monkeypatch):
 
 
 def test_orchestrator_rejects_an_empty_request(monkeypatch):
-    def generation_must_not_run(prompt: str) -> BaseModel:
+    def generation_must_not_run(prompt: str) -> Form:
         pytest.fail("La génération ne doit pas être appelée pour une demande vide.")
 
     monkeypatch.setattr(nodes, "generate_form_from_prompt", generation_must_not_run)

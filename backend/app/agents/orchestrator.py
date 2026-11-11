@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from app.agents import edges, nodes
 from app.agents.state import FormRequestState
+from app.schemas.form import Form
 
 Node = Callable[[FormRequestState], None]
 
@@ -17,7 +18,7 @@ def build_form_request_graph() -> tuple[dict[str, Node], str]:
     return graph, "validate_request"
 
 
-def orchestrate_form_request(prompt: str):
+def orchestrate_form_request(prompt: str) -> Form:
     """Lance les étapes du graphe et retourne le formulaire généré."""
     graph, current_node = build_form_request_graph()
     state = FormRequestState(prompt=prompt)

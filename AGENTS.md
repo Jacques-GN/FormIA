@@ -53,34 +53,59 @@ Tu n'es pas autorisé à transformer le projet en une architecture complexe simp
 
 ### 3.2 Architecture actuelle et architecture future
 
-La structure actuelle du dépôt est volontairement minimale. Elle constitue la référence pour le travail immédiat.
+L'architecture actuelle est un monolithe FastAPI modulaire. Les responsabilités
+et fichiers existants sont la référence pour le travail immédiat :
 
 ```text
 FormIA/
-├── backend/
-│   ├── app/
-│   │   ├── __init__.py
-│   │   └── main.py
-│   ├── tests/
-│   ├── .env.example
-│   └── requirements.txt
+├── AGENTS.md                 # consignes canoniques des agents
 ├── README.md
-├── AGENTS.md
-└── .gitignore
+├── .gitignore
+└── backend/
+    ├── .env.example
+    ├── requirements.txt
+    ├── app/
+    │   ├── main.py
+    │   ├── api/routes.py
+    │   ├── schemas/form.py
+    │   ├── agents/
+    │   │   ├── orchestrator.py
+    │   │   ├── state.py
+    │   │   ├── nodes.py
+    │   │   └── edges.py
+    │   ├── services/
+    │   │   ├── form_generator.py
+    │   │   └── LLM.py
+    │   ├── integrations/google_forms/
+    │   │   ├── client.py
+    │   │   └── oauth.py
+    │   └── core/
+    │       ├── config.py
+    │       └── security.py
+    └── tests/
 ```
 
-Cette structure décrit le point de départ, pas l'architecture finale.
+Cette arborescence décrit l'organisation actuelle, mais certains modules
+d'intégration Google sont encore des points d'extension et non des fonctions
+opérationnelles. Ne crée pas de dossiers ou fichiers vides pour des besoins
+futurs : ajoute un module uniquement lorsqu'une responsabilité réelle le
+justifie.
 
-À mesure que les responsabilités apparaissent, les modules pourront être séparés, par exemple :
-- `api/` : réception et traitement des requêtes HTTP ;
-- `schemas/` : modèles de données et validation ;
-- `services/` : logique métier ;
-- `agents/` : orchestration des interactions avec le modèle IA ;
-- `integrations/google_forms/` : communication avec Google Forms et OAuth ;
-- `core/` : configuration et fonctions transversales ;
-- `tests/` : tests automatisés.
+Le parcours de génération est réparti ainsi :
+- `core/config.py` charge la configuration et les secrets depuis l'environnement
+  et `backend/.env` ;
+- `services/LLM.py` isole les détails de communication avec le fournisseur de
+  modèle, actuellement via un protocole compatible OpenAI ;
+- `services/form_generator.py` appelle l'adaptateur et valide la réponse avec le
+  schéma `Form` ;
+- `agents/nodes.py` appelle le service à l'étape de génération ;
+- `agents/state.py` porte l'état partagé, `agents/edges.py` décide des
+  transitions et `agents/orchestrator.py` construit et exécute le graphe.
 
-Ne crée pas ces dossiers vides à l'avance. Explique la nécessité d'un nouveau dossier avant de l'ajouter.
+Un changement de fournisseur compatible OpenAI doit d'abord être possible par
+configuration (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`). Si son protocole
+diffère, adapte `services/LLM.py` sans déplacer la validation métier ni coupler
+le reste de l'application à ce fournisseur.
 
 ### 3.3 Architecture logicielle retenue
 
@@ -260,7 +285,10 @@ Ne présente jamais une fonctionnalité prévue comme déjà développée.
 - `AGENTS.md` : règles de contribution pour les assistants IA.
 - `docs/ARCHITECTURE.md` : architecture actuelle, évolution prévue et décisions techniques, à créer lorsque le besoin de documentation détaillée apparaît.
 
-Si deux documents se contredisent, ne choisis pas silencieusement. Signale la contradiction et demande ou propose une décision explicite avant de modifier l'architecture.
+`AGENTS.md` est l'unique source de vérité pour les consignes des agents. Le
+`README.md` décrit l'état du produit pour ses utilisateurs. Si des documents
+descriptifs divergent, corrige-les pour qu'ils reflètent l'architecture et
+l'état réels, sans dupliquer les consignes.
 
 ## 10. Workflow obligatoire avant chaque intervention
 
