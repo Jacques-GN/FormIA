@@ -173,9 +173,9 @@ Pour chaque étape significative, suis cette méthode :
 
 ### Style du code
 
-- Privilégier un code simple, explicite et lisible.
+- Privilégier un code optimisé, explicite et lisible.
 - Utiliser des noms de variables, fonctions et classes compréhensibles.
-- Ajouter des commentaires lorsque la logique n'est pas évidente.
+- Ajouter des commentaires explicite.
 - Éviter le code inutilement sophistiqué.
 - Ne pas cacher les erreurs avec des blocs `except` trop généraux.
 - Ne pas inventer des résultats de tests ou des sorties de commandes.
@@ -284,8 +284,6 @@ Ne présente jamais une fonctionnalité prévue comme déjà développée.
 - `README.md` : présentation, installation, commandes et état du projet.
 - `AGENTS.md` : règles de contribution pour les assistants IA.
 - `docs/ARCHITECTURE.md` : architecture actuelle, évolution prévue et décisions techniques, à créer lorsque le besoin de documentation détaillée apparaît.
-
-`AGENTS.md` est l'unique source de vérité pour les consignes des agents. Le
 `README.md` décrit l'état du produit pour ses utilisateurs. Si des documents
 descriptifs divergent, corrige-les pour qu'ils reflètent l'architecture et
 l'état réels, sans dupliquer les consignes.
