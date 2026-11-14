@@ -1,12 +1,84 @@
-"""Génération et validation des formulaires proposés par le LLM."""
+"""Logique IA de Formia : quoi demander au LLM, et comment vérifier sa réponse.
 
-from app.schemas.form import Form
+Liens avec les autres fichiers
+------------------------------
+- agents/nodes.py   : appelle analyze_request() et generate_form().
+- services/LLM.py   : envoie les messages au fournisseur (ce fichier n'y fait
+                      aucun appel réseau lui-même).
+- schemas/form.py   : fournit les modèles qui valident les réponses du LLM.
+
+Ce fichier ne connaît pas LangGraph : il reçoit des messages et rend un résultat.
+Sécurité : le texte de l'utilisateur est une entrée non fiable ; le LLM peut
+seulement proposer, et c'est le schéma Pydantic qui décide si c'est valide.
+"""
+
+from app.schemas.form import Form, RequestAnalysis
 from app.services.LLM import generate_completion
 
+# Consignes de l'« analyste ». Le mot JSON y figure : certains fournisseurs
+# l'exigent quand response_format vaut json_object (voir LLM.py).
+ANALYSIS_PROMPT = """\
+Tu analyses la demande d'un utilisateur qui veut créer un formulaire.
+Décide s'il manque des informations ESSENTIELLES pour le concevoir
+(par exemple : le sujet, le public visé, ou les informations à collecter).
+Réponds uniquement avec un objet JSON valide de ce format :
+{"questions": ["Question à poser à l'utilisateur"]}
+- Si la demande est assez claire, réponds {"questions": []}.
+- Pose au maximum 3 questions courtes, dans la langue de l'utilisateur.
+- Ne pose pas de question sur des détails que tu peux choisir toi-même.
+"""
 
-def generate_form(prompt: str) -> Form:
-    if not prompt.strip():
-        raise ValueError("La demande de formulaire ne peut pas être vide.")
+# Consignes du « concepteur ».
+GENERATION_PROMPT = """\
+Tu conçois des formulaires. Réponds uniquement avec un objet JSON valide
+conforme à ce format :
+{
+  "title": "Titre du formulaire",
+  "description": "Description facultative",
+  "questions": [
+    {
+      "title": "Intitulé de la question",
+      "type": "short_text",
+      "required": false,
+      "options": []
+    }
+  ]
+}
+Les types autorisés sont : short_text, paragraph, multiple_choice,
+checkboxes et dropdown. Les questions à choix doivent avoir au moins deux
+options. Les questions de texte ne doivent pas avoir d'options.
+Écris le formulaire dans la langue de l'utilisateur.
+"""
 
-    response = generate_completion(prompt.strip())
+
+def analyze_request(messages: list[dict[str, str]]) -> RequestAnalysis:
+    """Demande au LLM s'il manque des informations essentielles.
+
+    Retourne une RequestAnalysis : questions vide = on peut générer.
+    Lève une ValidationError si la réponse du LLM n'est pas conforme.
+    """
+    response = generate_completion(messages, system_prompt=ANALYSIS_PROMPT)
+    return RequestAnalysis.model_validate_json(response)
+
+
+def generate_form(messages: list[dict[str, str]], previous_error: str = "") -> Form:
+    """Demande au LLM de concevoir le formulaire, puis valide sa réponse.
+
+    previous_error : l'erreur de la tentative précédente, s'il y en a eu une.
+    On la renvoie au LLM pour qu'il corrige sa réponse.
+    Lève une ValidationError si le JSON est cassé ou non conforme au schéma Form.
+    """
+    if previous_error:
+        messages = [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    f"Ta réponse précédente était invalide : {previous_error}\n"
+                    "Corrige-la et réponds uniquement avec le JSON demandé."
+                ),
+            },
+        ]
+
+    response = generate_completion(messages, system_prompt=GENERATION_PROMPT)
     return Form.model_validate_json(response)

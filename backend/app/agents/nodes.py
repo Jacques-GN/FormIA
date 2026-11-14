@@ -1,17 +1,65 @@
-"""Étapes exécutées par le graphe de génération de formulaire."""
+"""Étapes (nœuds) du graphe LangGraph de Formia.
 
-from app.agents.state import FormRequestState
-from app.services.form_generator import generate_form as generate_form_from_prompt
+Un nœud reçoit l'état et retourne un dictionnaire des champs à modifier.
+Il délègue le travail IA à services/form_generator.py et ne décide jamais
+de la suite : c'est orchestrator.py qui choisit le chemin.
+
+Liens : state.py (contrat de l'état), form_generator.py (appels au LLM),
+orchestrator.py (assemble ces étapes en graphe).
+"""
+
+import json
+
+from pydantic import ValidationError
+
+from app.agents.state import FormiaState
+from app.services import form_generator
 
 
-def validate_request(state: FormRequestState) -> dict:
-    """Nettoie la demande et refuse une demande vide."""
-    prompt = state.prompt.strip()
-    if not prompt:
-        raise ValueError("La demande de formulaire ne peut pas être vide.")
-    return {"prompt": prompt}  # champ à mettre à jour dans l'état
+def analyser_demande(state: FormiaState) -> dict:
+    """Première étape de chaque tour : le LLM dit s'il manque des informations."""
+    analyse = form_generator.analyze_request(state["historique"])
+    return {
+        "questions": analyse.questions,
+        # Remise à zéro : l'état est conservé d'un message à l'autre.
+        "formulaire": {},
+        "tentatives": 0,
+        "erreur": "",
+    }
 
 
-def generate_form(state: FormRequestState) -> dict:
-    """Appelle le service de génération (le LLM) et stocke le formulaire."""
-    return {"form": generate_form_from_prompt(state.prompt)}
+def poser_questions(state: FormiaState) -> dict:
+    """Transforme les questions de clarification en message pour l'utilisateur."""
+    texte = "\n".join(f"- {question}" for question in state["questions"])
+    # operator.add sur « historique » : ce message est AJOUTÉ à la conversation.
+    return {"historique": [{"role": "assistant", "content": texte}]}
+
+
+def generer_formulaire(state: FormiaState) -> dict:
+    """Demande le formulaire au LLM. En cas d'échec, note l'erreur pour la relance."""
+    tentatives = state.get("tentatives", 0) + 1
+    try:
+        formulaire = form_generator.generate_form(
+            state["historique"],
+            previous_error=state.get("erreur", ""),
+        )
+    except ValidationError as erreur:
+        # On ne relance pas ici : on enregistre, le graphe décidera.
+        # Sécurité : ce texte sert au LLM, il ne doit jamais être montré au client.
+        return {"erreur": str(erreur), "tentatives": tentatives}
+
+    # mode="json" : types simples (le type de question devient un texte).
+    formulaire_dict = formulaire.model_dump(mode="json")
+    return {
+        "formulaire": formulaire_dict,
+        "erreur": "",
+        "tentatives": tentatives,
+        # Le formulaire entre dans la conversation : le LLM pourra le retrouver
+        # quand l'utilisateur demandera une correction.
+        "historique": [
+            {
+                "role": "assistant",
+                "content": json.dumps(formulaire_dict, ensure_ascii=False),
+            }
+        ],
+    }

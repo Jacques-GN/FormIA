@@ -48,3 +48,14 @@ class Form(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str = ""
     questions: list[Question] = Field(min_length=1, max_length=50)
+
+
+class RequestAnalysis(BaseModel):
+    """Résultat de l'analyse d'une demande par le LLM.
+
+    questions vide    -> la demande est assez claire, on peut générer le formulaire.
+    questions remplie -> il manque des informations, on les demande à l'utilisateur.
+    """
+
+    # max_length=3 : on évite d'accabler l'utilisateur de questions.
+    questions: list[str] = Field(default_factory=list, max_length=3)

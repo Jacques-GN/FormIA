@@ -1,4 +1,9 @@
-"""Adaptateur HTTP pour les fournisseurs compatibles avec l'API OpenAI."""
+"""Adaptateur HTTP pour les fournisseurs compatibles avec l'API OpenAI.
+
+Seul fichier qui parle au fournisseur de modèle : il envoie une conversation
+et retourne le texte JSON reçu. Il ne connaît ni les formulaires ni les
+consignes métier (elles sont dans services/form_generator.py).
+"""
 
 # Le nom de fichier conserve l'acronyme demandé par le projet.
 # ruff: noqa: N999
@@ -7,35 +12,23 @@ import httpx
 
 from app.core.config import settings
 
-SYSTEM_PROMPT = """\
-Tu conçois des formulaires. Réponds uniquement avec un objet JSON valide
-conforme à ce format :
-{
-  "title": "Titre du formulaire",
-  "description": "Description facultative",
-  "questions": [
-    {
-      "title": "Intitulé de la question",
-      "type": "short_text",
-      "required": false,
-      "options": []
-    }
-  ]
-}
-Les types autorisés sont : short_text, paragraph, multiple_choice,
-checkboxes et dropdown. Les questions à choix doivent avoir au moins deux
-options. Les questions de texte ne doivent pas avoir d'options.
-"""
-
 REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 def generate_completion(
-    prompt: str,
+    messages: list[dict[str, str]],
     *,
+    system_prompt: str,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
-    """Envoie une demande au fournisseur configuré et retourne le contenu JSON."""
+    """Envoie la conversation au fournisseur configuré et retourne le JSON reçu.
+
+    messages : l'historique, au format {"role": "user" | "assistant", "content": "..."}.
+    system_prompt : les consignes données au modèle pour cet appel.
+    transport : sert uniquement aux tests, pour simuler le réseau.
+    """
+    if not messages:
+        raise ValueError("La conversation envoyée au LLM ne peut pas être vide.")
     if not settings.llm_api_key:
         raise RuntimeError("La variable LLM_API_KEY n'est pas configurée.")
     if not settings.llm_model:
@@ -46,10 +39,11 @@ def generate_completion(
     url = f"{settings.llm_base_url.rstrip('/')}/chat/completions"
     payload = {
         "model": settings.llm_model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
+        # Le LLM n'a pas de mémoire : on lui renvoie les consignes (system)
+        # suivies de toute la conversation à chaque appel.
+        "messages": [{"role": "system", "content": system_prompt}, *messages],
+        # Garantit un JSON syntaxiquement valide, pas conforme à notre schéma :
+        # la validation Pydantic reste nécessaire.
         "response_format": {"type": "json_object"},
     }
     headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
