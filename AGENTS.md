@@ -72,7 +72,7 @@ FormIA/
     │   │   ├── orchestrator.py
     │   │   ├── state.py
     │   │   ├── nodes.py
-    │   │   └── edges.py
+    │   │   
     │   ├── services/
     │   │   ├── form_generator.py
     │   │   └── LLM.py
@@ -99,8 +99,8 @@ Le parcours de génération est réparti ainsi :
 - `services/form_generator.py` appelle l'adaptateur et valide la réponse avec le
   schéma `Form` ;
 - `agents/nodes.py` appelle le service à l'étape de génération ;
-- `agents/state.py` porte l'état partagé, `agents/edges.py` décide des
-  transitions et `agents/orchestrator.py` construit et exécute le graphe.
+- `agents/state.py` porte l'état partagé et `agents/ochestrator.py`  declare les etape et les
+  transitions du graphe langGraph, puisl'execute.
 
 Un changement de fournisseur compatible OpenAI doit d'abord être possible par
 configuration (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`). Si son protocole

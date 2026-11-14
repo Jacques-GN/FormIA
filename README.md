@@ -11,7 +11,7 @@ FastAPI et Pydantic.
 - L'API FastAPI expose `GET /` et `GET /health`.
 - Les schémas Pydantic de formulaire et de question sont définis dans
   `backend/app/schemas/form.py`.
-- Un graphe léger valide la demande, puis appelle le service de génération.
+- Un graphe langGraph valide la demande, puis appelle le service de génération.
 - Le service peut envoyer une demande à un fournisseur compatible avec l'API
   OpenAI, puis valider le JSON retourné avec le schéma `Form`.
 - Les tests couvrent les routes, les schémas, le graphe et l'adaptateur LLM.
@@ -38,7 +38,6 @@ backend/app/
 │   ├── orchestrator.py             # construit et exécute le graphe
 │   ├── state.py                    # état partagé
 │   ├── nodes.py                    # étapes du parcours
-│   └── edges.py                    # transitions entre étapes
 ├── services/
 │   ├── form_generator.py           # logique de génération et validation
 │   └── LLM.py                      # adaptateur HTTP fournisseur compatible OpenAI
