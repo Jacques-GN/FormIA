@@ -1,44 +1,75 @@
 """Routes HTTP publiques du backend.
 
-Liens : orchestrator.py (traiter_message fait avancer la conversation),
-schemas/form.py (le modèle Form renvoyé au client). main.py branche ce routeur
-sur l'application.
+Parcours complet :
+1. POST /forms/chat            -> l'agent répond ; un formulaire prêt arrive avec son empreinte.
+2. GET  /auth/google/login     -> redirige l'utilisateur vers Google pour son accord.
+3. GET  /auth/google/callback  -> Google revient ici ; on échange le code contre un jeton.
+4. POST /forms/confirm         -> l'utilisateur confirme une version précise ; on crée le formulaire.
+
+Liens : orchestrator.py (conversation), integrations/google_forms/ (oauth,
+token_store, client), core/security.py (state OAuth), schemas/form.py (Form).
 """
 
+import hashlib
+import secrets
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, StringConstraints
 
-from app.agents.orchestrator import traiter_message
+from app.agents.orchestrator import lire_etat, traiter_message
+from app.core.security import generate_oauth_state
+from app.integrations.google_forms import client as google_client
+from app.integrations.google_forms import oauth, token_store
 from app.schemas.form import Form
 
 router = APIRouter()
+
+# Motif strict : l'identifiant de session ne peut contenir aucun caractère inattendu.
+SESSION_ID_PATTERN = r"^[A-Za-z0-9-]{8,64}$"
+SessionId = Annotated[str, StringConstraints(pattern=SESSION_ID_PATTERN)]
+FormHash = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
+def empreinte_formulaire(form: Form) -> str:
+    """Signature SHA-256 d'un formulaire : le moindre changement la modifie."""
+    return hashlib.sha256(form.model_dump_json().encode("utf-8")).hexdigest()
 
 
 class ChatRequest(BaseModel):
     """Ce que le client envoie à chaque message."""
 
-    # Espaces retirés, vide refusé, taille bornée : on ne fait pas confiance à l'entrée.
     message: Annotated[
         str,
         StringConstraints(strip_whitespace=True, min_length=1, max_length=2000),
     ]
-    # Absent au premier message. Le motif interdit tout caractère inattendu.
-    session_id: (
-        Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9-]{8,64}$")] | None
-    ) = None
+    session_id: SessionId | None = None  # absent au premier message
 
 
 class ChatResponse(BaseModel):
     """Ce que le client reçoit : jamais l'état interne de l'agent."""
 
-    session_id: str  # à renvoyer pour continuer la conversation
+    session_id: str
     status: Literal["clarification", "form_ready", "failed"]
     questions: list[str] = Field(default_factory=list)
     form: Form | None = None
+    form_hash: str | None = None  # à renvoyer pour confirmer CETTE version
     message: str | None = None
+
+
+class ConfirmRequest(BaseModel):
+    """La confirmation porte sur une version précise (son empreinte)."""
+
+    session_id: SessionId
+    form_hash: FormHash
+
+
+class ConfirmResponse(BaseModel):
+    form_id: str
+    responder_url: str  # lien à partager pour répondre au formulaire
+    edit_url: str  # lien pour modifier le formulaire
 
 
 @router.get("/")
@@ -65,11 +96,12 @@ def chat(request: ChatRequest) -> ChatResponse:
         )
 
     if etat.get("formulaire"):
+        form = Form.model_validate(etat["formulaire"])
         return ChatResponse(
             session_id=session_id,
             status="form_ready",
-            # Revalidé avec le schéma Form avant de sortir de l'API.
-            form=Form.model_validate(etat["formulaire"]),
+            form=form,
+            form_hash=empreinte_formulaire(form),
         )
 
     # Message volontairement générique : le détail de l'erreur reste interne.
@@ -78,3 +110,74 @@ def chat(request: ChatRequest) -> ChatResponse:
         status="failed",
         message="La génération du formulaire a échoué. Veuillez réessayer.",
     )
+
+
+@router.get("/auth/google/login")
+def google_login(
+    session_id: Annotated[str, Query(pattern=SESSION_ID_PATTERN)],
+) -> RedirectResponse:
+    """Envoie le navigateur chez Google pour que l'utilisateur donne son accord."""
+    state = generate_oauth_state()
+    token_store.remember_state(state, session_id)  # pour retrouver la session au retour
+    return RedirectResponse(oauth.build_authorization_url(state))
+
+
+@router.get("/auth/google/callback")
+def google_callback(
+    code: Annotated[str | None, Query(max_length=2048)] = None,
+    state: Annotated[str | None, Query(max_length=128)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
+) -> dict[str, str]:
+    """Retour de Google : vérifie le « state », puis échange le code contre un jeton."""
+    if error or not code or not state:
+        raise HTTPException(
+            status_code=400,
+            detail="La connexion à Google a été refusée ou est incomplète.",
+        )
+
+    session_id = token_store.consume_state(state)  # usage unique
+    if session_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Demande de connexion invalide ou expirée.",
+        )
+
+    token = oauth.exchange_code_for_token(code)
+    token_store.store_token(
+        session_id, str(token["access_token"]), int(token["expires_in"])
+    )
+    return {
+        "status": "connected",
+        "message": "Connexion à Google réussie. Vous pouvez confirmer le formulaire.",
+    }
+
+
+@router.post("/forms/confirm")
+def confirm(request: ConfirmRequest) -> ConfirmResponse:
+    """Crée le formulaire dans Google, après confirmation de la version exacte."""
+    etat = lire_etat(request.session_id)
+    if not etat.get("formulaire"):
+        raise HTTPException(
+            status_code=404,
+            detail="Aucun formulaire prêt pour cette session.",
+        )
+
+    # On utilise la copie du SERVEUR : le client ne dicte jamais ce qui est créé.
+    form = Form.model_validate(etat["formulaire"])
+    if not secrets.compare_digest(empreinte_formulaire(form), request.form_hash):
+        raise HTTPException(
+            status_code=409,
+            detail="Le formulaire a changé depuis l'aperçu. Relisez-le puis confirmez.",
+        )
+
+    token = token_store.get_token(request.session_id)
+    if token is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Connexion à Google requise : ouvrez /auth/google/login.",
+        )
+
+    # L'empreinte vérifiée prouve que la version confirmée est celle-ci.
+    resultat = google_client.create_form(form, token, confirmed_form=form)
+    token_store.discard_token(request.session_id)  # moindre privilège
+    return ConfirmResponse(**resultat)

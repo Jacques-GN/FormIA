@@ -77,3 +77,11 @@ def traiter_message(message: str, session_id: str) -> FormiaState:
         "demande": message,
     }
     return graphe.invoke(entree, configuration)
+def lire_etat(session_id: str) -> FormiaState:
+    """Retourne l'état sauvegardé d'une session (vide si elle n'existe pas).
+
+    Permet à routes.py de retrouver le formulaire d'une session sans toucher
+    au graphe directement.
+    """
+    configuration = {"configurable": {"thread_id": session_id}}
+    return graphe.get_state(configuration).values
