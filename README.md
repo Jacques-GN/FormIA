@@ -1,64 +1,66 @@
 # FormIA
 
-FormIA vise à créer des formulaires Google Forms à partir d'une demande en
-langage naturel. Le backend est un monolithe modulaire construit avec Python,
-FastAPI et Pydantic.
+FormIA crée des formulaires Google Forms à partir d'une demande en langage
+naturel, grâce à un agent conversationnel. Le backend est un monolithe
+modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
 
 ## État du projet
 
 ### Déjà présent
 
-- L'API FastAPI expose `GET /` et `GET /health`.
-- Les schémas Pydantic de formulaire et de question sont définis dans
-  `backend/app/schemas/form.py`.
-- Un graphe langGraph valide la demande, puis appelle le service de génération.
-- Le service peut envoyer une demande à un fournisseur compatible avec l'API
-  OpenAI, puis valider le JSON retourné avec le schéma `Form`.
-- Les tests couvrent les routes, les schémas, le graphe et l'adaptateur LLM.
+- Une route `POST /forms/chat` permet de converser avec l'agent : il pose des
+  questions de clarification si la demande est incomplète, génère un
+  formulaire, puis le modifie à la demande dans la même session.
+- L'agent est un graphe LangGraph (analyser, clarifier, générer, valider) avec
+  relance automatique si le LLM produit un formulaire invalide.
+- La mémoire d'une conversation est conservée par `session_id`, en RAM.
+- Les schémas Pydantic `Form` et `Question` valident chaque formulaire généré.
+- Un adaptateur HTTP appelle tout fournisseur compatible avec l'API OpenAI.
+- Les tests (30) simulent le LLM : aucun appel réseau réel.
 
 ### Pas encore terminé
 
-- Il n'y a pas encore de route HTTP pour soumettre une demande et retourner le
-  formulaire généré.
-- L'appel réel au LLM nécessite de renseigner la configuration du fournisseur.
-- Le flux OAuth complet et la création de formulaires via Google Forms API ne
-  sont pas implémentés.
+- La création du formulaire dans un compte Google (OAuth, Google Forms API).
+- L'aperçu et la confirmation explicite avant création.
+- La gestion centralisée des erreurs (module dédié prévu).
+- Authentification, comptes utilisateurs et mémoire persistante : la mémoire
+  actuelle est perdue au redémarrage du serveur.
+- Le frontend.
 
-Les modules Google Forms actuels sont des points d'extension : l'application ne
-crée pas encore de formulaire dans un compte Google.
+Les modules `integrations/google_forms/` sont des points d'extension : l'application
+ne crée pas encore de formulaire dans un compte Google.
 
 ## Organisation du backend
 
 ```text
-backend/app/
-├── main.py                         # création de l'application FastAPI
-├── api/routes.py                   # routes HTTP
-├── schemas/form.py                 # modèles Pydantic Form et Question
-├── agents/
-│   ├── orchestrator.py             # construit et exécute le graphe
-│   ├── state.py                    # état partagé
-│   ├── nodes.py                    # étapes du parcours
-├── services/
-│   ├── form_generator.py           # logique de génération et validation
-│   └── LLM.py                      # adaptateur HTTP fournisseur compatible OpenAI
-├── integrations/google_forms/
-│   ├── client.py                   # futur client Google Forms
-│   └── oauth.py                    # préparation OAuth, flux à compléter
-└── core/
-    ├── config.py                   # paramètres d'environnement
-    └── security.py                 # utilitaires OAuth state
+backend/
+├── app/
+│   ├── main.py                     # création de l'application FastAPI
+│   ├── api/routes.py               # routes HTTP (/, /health, /forms/chat)
+│   ├── schemas/form.py             # Form, Question, RequestAnalysis
+│   ├── agents/
+│   │   ├── orchestrator.py         # graphe LangGraph, mémoire, traiter_message()
+│   │   ├── state.py                # état partagé du graphe
+│   │   └── nodes.py                # étapes : analyser, clarifier, générer
+│   ├── services/
+│   │   ├── form_generator.py       # consignes (prompts) et validation des réponses
+│   │   └── LLM.py                  # adaptateur HTTP compatible OpenAI
+│   ├── integrations/google_forms/
+│   │   ├── client.py               # futur client Google Forms
+│   │   └── oauth.py                # préparation OAuth, flux à compléter
+│   └── core/
+│       ├── config.py               # paramètres d'environnement
+│       └── security.py             # utilitaires OAuth state
+└── tests/                          # conftest.py bloque tout appel réel au LLM
 ```
 
-Le graphe appelle `agents/nodes.py`, qui utilise `services/form_generator.py`.
-Ce service délègue la communication avec le modèle à `services/LLM.py`. Les
-paramètres du fournisseur sont lus par `core/config.py`. Ainsi, un fournisseur
-compatible OpenAI peut généralement être changé en modifiant la configuration ;
-pour un protocole différent, l'adaptateur `LLM.py` est le point à remplacer.
+Le fil d'une requête : `routes.py` appelle `orchestrator.traiter_message()`, qui
+exécute le graphe. Les étapes de `nodes.py` délèguent à `form_generator.py`, qui
+envoie les messages via `LLM.py` et valide la réponse avec les schémas.
 
 ## Installation et démarrage sous Windows
 
-Depuis la racine du dépôt, créez un environnement virtuel, installez les
-dépendances et copiez le modèle de configuration :
+Depuis la racine du dépôt :
 
 ```powershell
 py -m venv backend\.venv
@@ -67,38 +69,52 @@ python -m pip install -r backend\requirements.txt
 Copy-Item backend\.env.example backend\.env
 ```
 
-Pour démarrer l'API :
+Démarrage de l'API (depuis la racine) :
 
 ```powershell
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-L'API est disponible sur `http://127.0.0.1:8000`. La documentation interactive
-FastAPI se trouve sur `http://127.0.0.1:8000/docs`.
+La documentation interactive est sur `http://127.0.0.1:8000/docs`.
+Attention : redémarrer le serveur efface la mémoire des conversations.
+
+## Utiliser l'agent
+
+Premier message (sans `session_id`) :
+
+```json
+{"message": "Je veux un formulaire d'inscription à un tournoi de football"}
+```
+
+La réponse contient un `session_id` et un `status` :
+
+- `clarification` : l'agent pose des questions (liste `questions`) ;
+- `form_ready` : le formulaire est dans `form` ;
+- `failed` : la génération a échoué.
+
+Pour répondre ou demander une modification, renvoyez le même `session_id`.
 
 ## Configuration du LLM
 
-La génération utilise les variables suivantes dans `backend\.env` :
+Variables de `backend\.env` :
 
 | Variable | Rôle |
 |---|---|
 | `LLM_API_KEY` | Clé secrète fournie par le service choisi |
-| `LLM_MODEL` | Nom ou identifiant du modèle |
-| `LLM_BASE_URL` | URL de base de l'API compatible OpenAI, par exemple `https://fournisseur.example/v1` |
+| `LLM_MODEL` | Nom exact du modèle |
+| `LLM_BASE_URL` | URL de base de l'API compatible OpenAI |
 
-`backend\.env.example` contient uniquement des valeurs vides ou fictives.
-Complétez le fichier local `backend\.env` ; ne mettez jamais de clé réelle dans
-le code, le README ou Git. La route HTTP de génération n'étant pas encore
-disponible, la configuration du fournisseur ne rend pas à elle seule le
-parcours accessible via l'API.
+Tout fournisseur compatible fonctionne en changeant ces trois valeurs. Groq a
+été validé en développement. Ne mettez jamais de clé réelle dans le code, le
+README ou Git, et redémarrez le serveur après toute modification du `.env`.
 
 ## Tests
 
-Depuis la racine du dépôt :
+Depuis le dossier `backend` :
 
 ```powershell
-python -m pytest backend\tests
+python -m pytest tests
 ```
 
-Les tests n'appellent pas un fournisseur LLM réel ; les échanges réseau sont
-simulés afin de tester le format de la requête et la validation de la réponse.
+Les tests simulent le LLM. `tests/conftest.py` vide la configuration du
+fournisseur pour qu'aucun test n'atteigne un vrai service.

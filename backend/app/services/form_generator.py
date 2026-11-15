@@ -24,7 +24,7 @@ Décide s'il manque des informations ESSENTIELLES pour le concevoir
 Réponds uniquement avec un objet JSON valide de ce format :
 {"questions": ["Question à poser à l'utilisateur"]}
 - Si la demande est assez claire, réponds {"questions": []}.
-- Pose au maximum 3 questions courtes, dans la langue de l'utilisateur.
+- Pose au maximum 3 questions courtes, rédigées uniquement dans la langue de l'utilisateur (aucun mot d'une autre langue).
 - Ne pose pas de question sur des détails que tu peux choisir toi-même.
 """
 
