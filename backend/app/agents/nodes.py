@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.agents.intent_router import Intention, normaliser_intention
 from app.agents.state import FormiaState
+from app.schemas.form import Form
 from app.services import form_generator, form_operations
 
 
@@ -67,22 +68,48 @@ def generer_formulaire(state: FormiaState) -> dict:
 
 
 def gerer_modification(state: FormiaState) -> dict:
-    """Modification ciblée : le LLM propose un nouveau formulaire basé sur la demande."""
+    """Modification ciblée : le LLM propose une opération, le backend l'applique.
+
+    Lien : form_generator.propose_modification (LLM) -> form_operations (backend
+    pur, pas de régénération complète).
+    """
     tentatives = state.get("tentatives", 0) + 1
     try:
-        formulaire = form_generator.generate_form(
+        modification = form_generator.propose_modification(
             state["historique"], previous_error=state.get("erreur", "")
         )
     except ValidationError as erreur:
         return {"erreur": str(erreur), "tentatives": tentatives}
 
-    formulaire_dict = formulaire.model_dump(mode="json")
+    formule = state.get("formulaire")
+    if not formule:
+        return {"erreur": "Aucun formulaire à modifier.", "tentatives": tentatives}
+
+    try:
+        form = Form.model_validate(formule)
+        if modification.type.value == "ajouter":
+            form = form_operations.ajouter_question(
+                form, modification.question, modification.position
+            )
+        elif modification.type.value == "supprimer":
+            form = form_operations.supprimer_question(form, modification.position)
+        elif modification.type.value == "modifier":
+            form = form_operations.modifier_question(
+                form, modification.position, modification.question
+            )
+    except Exception as erreur:
+        return {"erreur": str(erreur), "tentatives": tentatives}
+
+    formulaire_dict = form.model_dump(mode="json")
     return {
         "formulaire": formulaire_dict,
         "erreur": "",
         "tentatives": tentatives,
         "historique": [
-            {"role": "assistant", "content": json.dumps(formulaire_dict, ensure_ascii=False)}
+            {
+                "role": "assistant",
+                "content": f"Modification appliquée : {modification.type.value} à la position {modification.position}.",
+            }
         ],
     }
 

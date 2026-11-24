@@ -17,6 +17,11 @@ modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
   nouvelle idée, ajout de contexte, modification, demande de justification,
   validation explicite, annulation ou hors sujet. Il court-circuite le LLM pour
   les messages hors sujet ou les annulations (coût zéro).
+- Les modifications s'appliquent par opérations ciblées (ajouter/supprimer/
+  modifier une question) via le LLM qui propose une opération et le backend qui
+  l'exécute (pas de régénération complète non contrôlée).
+- Les types de question acceptent des alias (ex: "text" → short_text,
+  "radio" → multiple_choice).
 - La mémoire d'une conversation est conservée par `session_id`, en RAM
   (`InMemorySaver`) : elle est perdue au redémarrage du serveur.
 - Les schémas Pydantic `Form`, `Question` et `RequestAnalysis` valident chaque

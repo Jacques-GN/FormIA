@@ -61,7 +61,7 @@ class ChatResponse(BaseModel):
     """Ce que le client reçoit : jamais l'état interne de l'agent."""
 
     session_id: str
-    status: Literal["clarification", "form_ready", "failed"]
+    status: Literal["clarification", "form_ready", "failed", "info"]
     questions: list[str] = Field(default_factory=list)
     form: Form | None = None
     form_hash: str | None = None  # à renvoyer pour confirmer CETTE version
@@ -115,6 +115,13 @@ def chat(request: ChatRequest) -> ChatResponse:
             form=form,
             form_hash=empreinte_formulaire(form),
             message=render_proposal(form),
+        )
+
+    if etat.get("message"):
+        return ChatResponse(
+            session_id=session_id,
+            status="info",
+            message=etat["message"],
         )
 
     # Message volontairement générique : le détail de l'erreur reste interne.

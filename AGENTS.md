@@ -49,7 +49,7 @@ Cette section doit être mise à jour avec le README après chaque bloc signific
 - connexion Google OAuth et création réelle dans Google Forms après confirmation de l'empreinte du formulaire ;
 - module centralisé d'exceptions (`core/exceptions.py`) et réponses HTTP uniformes `{code, message}` ;
 - création Google idempotente par empreinte, avec reprise sur le même formulaire après échec partiel ;
-- 97 tests automatisés (LLM et Google simulés).
+- 98 tests automatisés (LLM et Google simulés).
 
 À faire selon l'état déclaré dans le projet :
 - vérifier la cohérence de l'état actuel du projet avec ce fichier ;

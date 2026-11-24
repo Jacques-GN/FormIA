@@ -12,7 +12,7 @@ Sécurité : le texte de l'utilisateur est une entrée non fiable ; le LLM peut
 seulement proposer, et c'est le schéma Pydantic qui décide si c'est valide.
 """
 
-from app.schemas.form import Form, RequestAnalysis
+from app.schemas.form import Form, Modification, RequestAnalysis
 from app.services.LLM import generate_completion
 
 # Plafond d'historique envoyé au LLM : le coût doit rester borné même sur une
@@ -109,3 +109,57 @@ def generate_form(messages: list[dict[str, str]], previous_error: str = "") -> F
         _bounded_history(messages), system_prompt=GENERATION_PROMPT
     )
     return Form.model_validate_json(response)
+
+
+# Consignes pour proposer une modification ciblée (§5 : opération ciblée,
+# pas régénération complète non contrôlée).
+MODIFICATION_PROMPT = """\
+Tu proposes une modification ciblée sur un formulaire existant. Réponds
+uniquement avec un objet JSON valide de ce format :
+{
+  "type": "ajouter" | "supprimer" | "modifier",
+  "position": 3,
+  "question": {
+    "title": "Intitulé de la question",
+    "description": "Précision facultative",
+    "type": "short_text",
+    "required": false,
+    "options": [],
+    "origin": "user",
+    "justification": ""
+  }
+}
+- "ajouter" : insère la question à la position donnée (question requise).
+- "supprimer" : retire la question à la position donnée (question ignorée).
+- "modifier" : remplace la question à la position donnée (question requise).
+La position est 1-indexée (1 = première question).
+N'invente pas de besoin : ne modifie que ce que l'utilisateur a demandé.
+Écris dans la langue de l'utilisateur.
+"""
+
+
+def propose_modification(
+    messages: list[dict[str, str]], previous_error: str = ""
+) -> Modification:
+    """Demande au LLM de proposer une modification ciblée du formulaire.
+
+    Retourne une Modification validée par Pydantic. Le backend l'applique
+    ensuite via form_operations (opération pure, pas de régénération complète).
+    Lève une ValidationError si la réponse du LLM n'est pas conforme.
+    """
+    if previous_error:
+        messages = [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    f"Ta réponse précédente était invalide : {previous_error}\n"
+                    "Corrige-la et réponds uniquement avec le JSON demandé."
+                ),
+            },
+        ]
+
+    response = generate_completion(
+        _bounded_history(messages), system_prompt=MODIFICATION_PROMPT
+    )
+    return Modification.model_validate_json(response)

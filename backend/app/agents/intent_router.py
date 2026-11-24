@@ -361,3 +361,15 @@ class IntentRouter:
             return meilleure_intention, meilleur_score
 
         return meilleure_intention, meilleur_score
+
+
+def normaliser_intention(valeur) -> Intention | None:
+    """Accepte un enum Intention ou sa chaîne sérialisée par LangGraph."""
+    if isinstance(valeur, Intention):
+        return valeur
+    if isinstance(valeur, str):
+        try:
+            return Intention(valeur)
+        except ValueError:
+            return None
+    return None

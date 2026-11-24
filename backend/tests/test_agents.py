@@ -2,8 +2,16 @@
 
 from uuid import uuid4
 
+from app.agents import nodes
 from app.agents.orchestrator import MAX_TENTATIVES, traiter_message
-from app.schemas.form import Form, Question, QuestionType, RequestAnalysis
+from app.schemas.form import (
+    Form,
+    Modification,
+    ModificationType,
+    Question,
+    QuestionType,
+    RequestAnalysis,
+)
 from app.services import form_generator
 
 FORMULAIRE = Form(
@@ -144,13 +152,105 @@ def test_annulation_vide_le_formulaire_en_cours(monkeypatch):
     )
 
     session = nouvelle_session()
-    # D'abord, on génère un formulaire.
     etat = traiter_message("Un formulaire d'inscription", session)
     assert etat.get("formulaire")
 
-    # Ensuite, on annule.
     etat = traiter_message("Annule tout", session)
 
     assert etat.get("formulaire") == {}
     assert etat.get("questions") == []
     assert etat.get("erreur") == ""
+
+
+def test_modification_applique_operation_ciblee(monkeypatch):
+    """Modification : le LLM propose une operation ciblee, le backend l'applique."""
+    appele = {"compteur": 0}
+
+    def propose(messages, previous_error=""):
+        appele["compteur"] += 1
+        return Modification(
+            type=ModificationType.MODIFIER,
+            position=1,
+            question=Question(
+                title="Nouvelle Q", type=QuestionType.SHORT_TEXT
+            ),
+        )
+
+    monkeypatch.setattr(form_generator, "analyze_request", lambda m: RequestAnalysis())
+    monkeypatch.setattr(
+        form_generator,
+        "generate_form",
+        lambda messages, previous_error="": Form(
+            title="Inscription",
+            questions=[Question(title="Q1", type=QuestionType.SHORT_TEXT)],
+        ),
+    )
+    monkeypatch.setattr(form_generator, "propose_modification", propose)
+
+    session = nouvelle_session()
+    traiter_message("Un formulaire d'inscription", session)
+    appele["compteur"] = 0
+    etat = traiter_message("Change la premiere question", session)
+
+    assert appele["compteur"] == 1
+
+
+def test_gerer_modification_directement(monkeypatch):
+    """gerer_modification applique une operation via form_operations."""
+    from app.agents import nodes
+    from app.services import form_generator
+
+    formule = Form(
+        title="Test",
+        questions=[Question(title="Q1", type=QuestionType.SHORT_TEXT)],
+    ).model_dump(mode="json")
+
+    etat = {
+        "historique": [{"role": "user", "content": "Change la question"}],
+        "formulaire": formule,
+        "questions": [],
+        "tentatives": 0,
+        "erreur": "",
+    }
+
+    mod = Modification(
+        type=ModificationType.MODIFIER,
+        position=1,
+        question=Question(title="Nouvelle Q", type=QuestionType.SHORT_TEXT),
+    )
+    monkeypatch.setattr(form_generator, "propose_modification", lambda *a, **k: mod)
+    res = nodes.gerer_modification(etat)
+
+    assert res["erreur"] == ""
+    assert res["formulaire"]["questions"][0]["title"] == "Nouvelle Q"
+
+
+def test_justification_affiche_origine_des_questions(monkeypatch):
+    """Demande de justification : affiche origine et justification suggeree."""
+    monkeypatch.setattr(form_generator, "analyze_request", lambda m: RequestAnalysis())
+
+    formule = {
+        "title": "Test",
+        "questions": [
+            {"title": "Nom", "type": "short_text", "origin": "user"},
+            {
+                "title": "Age",
+                "type": "short_text",
+                "origin": "suggested",
+                "justification": "pour adapter les groupes",
+            },
+        ],
+    }
+    etat = nodes.gerer_justification(
+        {
+            "intention": "demande_justification",
+            "formulaire": formule,
+            "questions": [],
+            "tentatives": 0,
+            "erreur": "",
+        }
+    )
+
+    texte = etat["historique"][0]["content"]
+    assert "suggérée : pour adapter les groupes" in texte
+    assert "demandée par vous" in texte

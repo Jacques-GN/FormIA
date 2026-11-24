@@ -133,3 +133,32 @@ class RequestAnalysis(BaseModel):
 
     # max_length=3 : on évite d'accabler l'utilisateur de questions.
     questions: list[str] = Field(default_factory=list, max_length=3)
+
+
+class ModificationType(str, Enum):
+    """Type d'opération ciblée sur le formulaire."""
+
+    AJOUTER = "ajouter"
+    SUPPRIMER = "supprimer"
+    MODIFIER = "modifier"
+
+
+class Modification(BaseModel):
+    """Opération ciblée sur une question du formulaire.
+
+    Le LLM propose l'opération ; le backend l'applique via form_operations.
+    """
+
+    type: ModificationType
+    position: int = Field(ge=1, description="Position 1-indexée de la question")
+    question: Question | None = None  # requis pour AJOUTER et MODIFIER
+
+    @model_validator(mode="after")
+    def check_question_when_required(self):
+        """Une question est obligatoire pour ajouter ou modifier."""
+        if self.type in {ModificationType.AJOUTER, ModificationType.MODIFIER}:
+            if self.question is None:
+                raise ValueError(
+                    f"Une question est requise pour l'opération {self.type}."
+                )
+        return self
