@@ -45,19 +45,19 @@ Cette section doit être mise à jour avec le README après chaque bloc signific
 État précédemment déclaré :
 - agent LangGraph avec étapes d'analyse, clarification, génération et validation avec relance ;
 - mémoire de session en RAM ;
-- route `POST /forms/chat` ;
-- connexion Google OAuth ;
-- création réelle dans Google Forms après confirmation de l'empreinte du formulaire.
+- routes `POST /forms/chat`, `GET /auth/google/login`, `GET /auth/google/callback` et `POST /forms/confirm` ;
+- connexion Google OAuth et création réelle dans Google Forms après confirmation de l'empreinte du formulaire ;
+- module centralisé d'exceptions (`core/exceptions.py`) et réponses HTTP uniformes `{code, message}` ;
+- création Google idempotente par empreinte, avec reprise sur le même formulaire après échec partiel ;
+- 62 tests automatisés (LLM et Google simulés).
 
 À faire selon l'état déclaré dans le projet :
-- verifier la coherence de l'etat actuel projet au fichier `AGENTS.md`
-- terminer et exécuter les tests du Bloc B ;
-- mettre à jour le README pour refléter le Bloc B ;
-- module centralisé d'exceptions ;
+- vérifier la cohérence de l'état actuel du projet avec ce fichier ;
+- prévoir des tests d'intégration Google réels, séparés de la suite simulée ;
 - agent consultant et ses parcours Découverte et Direct ;
 - authentification, autorisations et propriété des ressources ;
 - persistance PostgreSQL et checkpointer durable ;
-- gestion durable des connexions Google ;
+- gestion durable des connexions Google (refresh token chiffré, révocation) ;
 - résilience, exploitation et observabilité ;
 - frontend desktop-first.
 

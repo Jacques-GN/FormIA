@@ -28,24 +28,28 @@ modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
   serveur, jamais celle envoyée par le client.
 - Le client Google Forms traduit les 5 types de questions et crée le formulaire
   en deux appels (création vide, puis description et questions).
-- Les tests (30) simulent le LLM : aucun appel réseau réel.
+- La création est idempotente par empreinte : une seconde confirmation renvoie
+  le résultat déjà obtenu sans rappeler Google. Après un échec partiel, la
+  confirmation reprend sur le même formulaire en ne recréant que les questions
+  absentes.
+- Un module centralisé d'exceptions (`core/exceptions.py`) convertit les erreurs
+  métier en réponses uniformes `{code, message}`, sans détail interne. Les
+  appels LLM sont relancés sur 429/5xx avec attente croissante et jitter.
+- L'historique envoyé au LLM est borné (20 messages, brief initial conservé) et
+  chaque appel journalise durée, modèle, statut et tokens, jamais le contenu.
+- Les tests (62) simulent le LLM et Google : aucun appel réseau réel.
 
 ### Pas encore terminé
 
-- Création Google robuste : aucune clé d'idempotence, aucune reprise si le
-  formulaire est créé mais que l'ajout des questions échoue, aucun état
-  `UNKNOWN_EXTERNAL_RESULT`.
-- Aucun module centralisé d'exceptions : une panne du LLM ou de Google remonte
-  aujourd'hui en erreur 500 générique.
-- Aucun test automatisé des routes OAuth, de `/forms/confirm` et du client
-  Google Forms.
+- Aucun test d'intégration réel contre Google (OAuth et création) : la suite
+  automatisée ne prouve pas encore le parcours complet chez Google.
+- Le registre d'idempotence est en RAM : il ne survit pas au redémarrage et
+  n'est pas partagé entre processus.
+- La confirmation n'est pas encore reliée à une version numérotée et historisée
+  du formulaire.
 - Authentification FormIA, propriété des ressources, jeton Google durable
   (refresh token chiffré) et persistance PostgreSQL : la mémoire et les jetons
   sont en RAM.
-- La confirmation n'est pas encore reliée à une version numérotée et historisée
-  du formulaire.
-- L'historique envoyé au LLM n'est pas borné ; les tokens et coûts ne sont pas
-  mesurés.
 - Le frontend.
 
 ## Organisation du backend
@@ -65,12 +69,15 @@ backend/
 │   │   └── LLM.py                  # adaptateur HTTP compatible OpenAI
 │   ├── integrations/google_forms/
 │   │   ├── client.py               # traduction Form -> Google Forms et création
+│   │   ├── creation_store.py       # suivi idempotent des créations, en RAM
 │   │   ├── oauth.py                # URL de consentement et échange du code
 │   │   └── token_store.py          # « state » OAuth et jetons d'accès, en RAM
 │   └── core/
 │       ├── config.py               # paramètres d'environnement
+│       ├── exceptions.py           # erreurs métier et codes HTTP
+│       ├── retry.py                # relances contrôlées sur 429/5xx
 │       └── security.py             # génération du « state » OAuth
-└── tests/                          # conftest.py bloque tout appel réel au LLM
+└── tests/                          # LLM et Google simulés
 ```
 
 Le fil d'une requête : `routes.py` appelle `orchestrator.traiter_message()`, qui
@@ -163,10 +170,33 @@ Depuis le dossier `backend` :
 python -m pytest tests
 ```
 
-Les tests simulent le LLM. `tests/conftest.py` vide la configuration du
-fournisseur pour qu'aucun test n'atteigne un vrai service. Les routes OAuth, la
-confirmation et le client Google Forms ne sont pas encore couverts : `pytest`
-ne prouve donc pas encore la création réelle.
+Les tests simulent le LLM et Google : `tests/conftest.py` vide la configuration
+des fournisseurs et isole les registres pour qu'aucun test n'atteigne un vrai
+service. La suite couvre notamment :
+
+- la conversation, les schémas et le graphe de l'agent ;
+- l'adaptateur LLM (requête compatible OpenAI, relances, erreurs de config) ;
+- le client Google Forms (les 5 types, reprise sans doublon, échec partiel) ;
+- `/forms/confirm` : 404, 401, 409, succès, double confirmation et reprise ;
+- OAuth : `state` à usage unique et expiré, URL de consentement, échange du code ;
+- le registre d'idempotence et les relances 429/5xx.
+
+En revanche, aucun test ne contacte réellement Google : le parcours complet chez
+Google reste à vérifier manuellement.
+
+## Compatibilité Google Forms
+
+| Type FormIA | Élément Google Forms | Création par l'API |
+|---|---|---|
+| `short_text` | `textQuestion` (`paragraph: false`) | Oui |
+| `paragraph` | `textQuestion` (`paragraph: true`) | Oui |
+| `multiple_choice` | `choiceQuestion` type `RADIO` | Oui |
+| `checkboxes` | `choiceQuestion` type `CHECKBOX` | Oui |
+| `dropdown` | `choiceQuestion` type `DROP_DOWN` | Oui |
+| Import de fichier | `fileUploadQuestion` | Non (non pris en charge par l'API) |
+
+`documentTitle` peut être défini à la création mais ne peut pas être modifié par
+`batchUpdate` : FormIA ne le change donc qu'à la création.
 
 ## Limites connues
 
@@ -174,7 +204,11 @@ ne prouve donc pas encore la création réelle.
   l'API Forms : FormIA ne la propose pas.
 - Le schéma ne gère ni sections, ni description par question, ni échelle, ni
   date, ni validation conditionnelle.
-- Toute la mémoire (conversations, « state » OAuth, jetons Google) est locale au
-  processus : pas de partage entre plusieurs workers, perte au redémarrage.
-- Aucune garantie d'unicité si `/forms/confirm` est appelé deux fois de suite
-  avant que le premier appel ait terminé.
+- Toute la mémoire (conversations, « state » OAuth, jetons Google, registre des
+  créations) est locale au processus : pas de partage entre plusieurs workers,
+  perte au redémarrage.
+- L'idempotence de `/forms/confirm` n'est garantie que dans le processus courant :
+  après un redémarrage, le registre est vide et une confirmation peut créer un
+  nouveau formulaire.
+- Les jetons Google sont associés à un `session_id`, pas encore à un utilisateur
+  authentifié : la propriété des ressources relève du Bloc C.
