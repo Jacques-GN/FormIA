@@ -2,7 +2,7 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class QuestionType(str, Enum):
@@ -35,6 +35,26 @@ CHOICE_TYPES = {
 }
 
 
+# Mapping des variantes de type vers les types canoniques FormIA.
+# Inspiré de hossein-haeri/google-form-builder (normalize_type).
+TYPE_ALIASES = {
+    "text": QuestionType.SHORT_TEXT,
+    "short_text": QuestionType.SHORT_TEXT,
+    "short_answer": QuestionType.SHORT_TEXT,
+    "long_text": QuestionType.PARAGRAPH,
+    "paragraph": QuestionType.PARAGRAPH,
+    "long_answer": QuestionType.PARAGRAPH,
+    "textarea": QuestionType.PARAGRAPH,
+    "radio": QuestionType.MULTIPLE_CHOICE,
+    "multiple_choice": QuestionType.MULTIPLE_CHOICE,
+    "select": QuestionType.DROPDOWN,
+    "dropdown": QuestionType.DROPDOWN,
+    "checkbox": QuestionType.CHECKBOXES,
+    "checkboxes": QuestionType.CHECKBOXES,
+    "multi_select": QuestionType.CHECKBOXES,
+}
+
+
 class Question(BaseModel):
     """Une question du formulaire."""
 
@@ -63,6 +83,16 @@ class Question(BaseModel):
             if not data.get("origin") and data.get("justification"):
                 return {**data, "origin": QuestionOrigin.SUGGESTED}
         return data
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normaliser_type(cls, valeur):
+        """Accepte les variantes de type (ex: 'text', 'radio') et les normalize."""
+        if isinstance(valeur, str):
+            cle = valeur.strip().lower()
+            if cle in TYPE_ALIASES:
+                return TYPE_ALIASES[cle]
+        return valeur
 
     @model_validator(mode="after")
     def check_options_match_type(self):

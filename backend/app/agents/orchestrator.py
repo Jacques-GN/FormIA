@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import nodes
-from app.agents.intent_router import IntentRouter, Intention
+from app.agents.intent_router import IntentRouter, Intention, normaliser_intention
 from app.agents.state import FormiaState
 
 # Nombre maximal de générations par message : évite une boucle sans fin
@@ -20,14 +20,14 @@ MAX_TENTATIVES = 2
 
 
 def apres_analyse(state: FormiaState) -> str:
-    """Des questions à poser ? Sinon, on génère le formulaire.
-
-    Sauf si l'intention est hors sujet ou annulation : on s'arrête sans
-    appeler le LLM.
-    """
-    intention = state.get("intention")
+    """Route selon l'intention détectée par le routeur."""
+    intention = normaliser_intention(state.get("intention"))
     if intention in {Intention.HORS_SUJET, Intention.ANNULATION}:
         return "terminer"
+    if intention == Intention.MODIFICATION:
+        return "modifier"
+    if intention == Intention.DEMANDE_JUSTIFICATION:
+        return "justification"
     return "clarifier" if state.get("questions") else "generer"
 
 
@@ -47,6 +47,8 @@ def construire_graphe():
     builder.add_node("analyser_demande", nodes.analyser_demande)
     builder.add_node("poser_questions", nodes.poser_questions)
     builder.add_node("generer_formulaire", nodes.generer_formulaire)
+    builder.add_node("modifier", nodes.gerer_modification)
+    builder.add_node("justification", nodes.gerer_justification)
 
     builder.add_edge(START, "analyser_demande")
 
@@ -57,10 +59,14 @@ def construire_graphe():
         {
             "clarifier": "poser_questions",
             "generer": "generer_formulaire",
+            "modifier": "modifier",
+            "justification": "justification",
             "terminer": END,
         },
     )
     builder.add_edge("poser_questions", END)
+    builder.add_edge("modifier", END)
+    builder.add_edge("justification", END)
     builder.add_conditional_edges(
         "generer_formulaire",
         apres_generation,
@@ -80,21 +86,22 @@ graphe = construire_graphe()
 routeur = IntentRouter()
 
 
+def initial_state(message: str, session_id: str) -> dict:
+    """Construit l'état initial d'une conversation (fonction fabrique)."""
+    return {
+        "historique": [{"role": "user", "content": message}],
+        "demande": message,
+        "intention": routeur.router(message).intention,
+    }
+
+
 def traiter_message(message: str, session_id: str) -> FormiaState:
     """Fait avancer la conversation d'un message et retourne l'état final.
 
     session_id : identifiant de la conversation. Même identifiant = même mémoire.
     """
     configuration = {"configurable": {"thread_id": session_id}}
-    entree = {
-        # operator.add : ce message est ajouté à l'historique déjà sauvegardé.
-        "historique": [{"role": "user", "content": message}],
-        "demande": message,
-        # Intention détectée pour ce tour : stockée dans l'état, exploitée
-        # par les nœuds et par routes.py pour adapter la réponse.
-        "intention": routeur.router(message).intention,
-    }
-    return graphe.invoke(entree, configuration)
+    return graphe.invoke(initial_state(message, session_id), configuration)
 
 
 def lire_etat(session_id: str) -> FormiaState:

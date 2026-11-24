@@ -41,7 +41,7 @@ modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
   appels LLM sont relancés sur 429/5xx avec attente croissante et jitter.
 - L'historique envoyé au LLM est borné (20 messages, brief initial conservé) et
   chaque appel journalise durée, modèle, statut et tokens, jamais le contenu.
-- Les tests (85) simulent le LLM et Google : aucun appel réseau réel.
+- Les tests (97) simulent le LLM et Google : aucun appel réseau réel.
 
 ### Pas encore terminé
 

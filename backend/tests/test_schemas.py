@@ -90,3 +90,21 @@ def test_empty_title_is_refused():
 def test_form_without_questions_is_refused():
     with pytest.raises(ValidationError):
         Form(title="Formulaire vide", questions=[])
+
+
+# ---------- Normalisation des types (alias) ----------
+
+
+def test_type_alias_text_est_normalise_en_short_text():
+    question = Question(title="Nom", type="text")
+    assert question.type is QuestionType.SHORT_TEXT
+
+
+def test_type_alias_radio_est_normalise_en_multiple_choice():
+    question = Question(title="Choix", type="radio", options=["A", "B"])
+    assert question.type is QuestionType.MULTIPLE_CHOICE
+
+
+def test_type_alias_paragraph_est_normalise():
+    question = Question(title="Details", type="long_answer")
+    assert question.type is QuestionType.PARAGRAPH
