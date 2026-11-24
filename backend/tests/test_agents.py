@@ -108,3 +108,49 @@ def test_la_session_garde_l_historique_et_reste_isolee(monkeypatch):
 
     assert messages_utilisateur(etat) == ["Premier message", "Deuxième message"]
     assert messages_utilisateur(autre_etat) == ["Autre conversation"]
+
+
+def test_hors_sujet_n_appelle_pas_le_llm(monkeypatch):
+    """Un message hors sujet ne doit pas déclencher d'appel LLM (coût zéro)."""
+    analyse_appelee = {"compteur": 0}
+
+    def analyse_surveillee(messages):
+        analyse_appelee["compteur"] += 1
+        return RequestAnalysis()
+
+    def generate_bloque(*args, **kwargs):
+        raise AssertionError(
+            "generate_form ne doit pas être appelé pour un hors sujet"
+        )
+
+    monkeypatch.setattr(form_generator, "analyze_request", analyse_surveillee)
+    monkeypatch.setattr(form_generator, "generate_form", generate_bloque)
+
+    etat = traiter_message("Quel temps fait-il ?", nouvelle_session())
+
+    assert analyse_appelee["compteur"] == 0
+    assert etat.get("erreur") == "hors_sujet"
+    assert not etat.get("questions")
+    assert not etat.get("formulaire")
+
+
+def test_annulation_vide_le_formulaire_en_cours(monkeypatch):
+    """Annuler supprime le formulaire et les questions en cours."""
+    monkeypatch.setattr(
+        form_generator, "analyze_request", lambda messages: RequestAnalysis()
+    )
+    monkeypatch.setattr(
+        form_generator, "generate_form", lambda *a, **k: FORMULAIRE
+    )
+
+    session = nouvelle_session()
+    # D'abord, on génère un formulaire.
+    etat = traiter_message("Un formulaire d'inscription", session)
+    assert etat.get("formulaire")
+
+    # Ensuite, on annule.
+    etat = traiter_message("Annule tout", session)
+
+    assert etat.get("formulaire") == {}
+    assert etat.get("questions") == []
+    assert etat.get("erreur") == ""

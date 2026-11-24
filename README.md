@@ -13,6 +13,10 @@ modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
   dans la même session.
 - L'agent est un graphe LangGraph (analyser, clarifier, générer) avec relance
   automatique si le LLM produit un formulaire invalide (2 tentatives maximum).
+- Un routeur d'intentions déterministe (aucun appel LLM) classe chaque message :
+  nouvelle idée, ajout de contexte, modification, demande de justification,
+  validation explicite, annulation ou hors sujet. Il court-circuite le LLM pour
+  les messages hors sujet ou les annulations (coût zéro).
 - La mémoire d'une conversation est conservée par `session_id`, en RAM
   (`InMemorySaver`) : elle est perdue au redémarrage du serveur.
 - Les schémas Pydantic `Form`, `Question` et `RequestAnalysis` valident chaque
@@ -37,7 +41,7 @@ modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
   appels LLM sont relancés sur 429/5xx avec attente croissante et jitter.
 - L'historique envoyé au LLM est borné (20 messages, brief initial conservé) et
   chaque appel journalise durée, modèle, statut et tokens, jamais le contenu.
-- Les tests (71) simulent le LLM et Google : aucun appel réseau réel.
+- Les tests (85) simulent le LLM et Google : aucun appel réseau réel.
 
 ### Pas encore terminé
 
@@ -62,6 +66,7 @@ backend/
 │   ├── schemas/form.py             # Form, Question, QuestionType, RequestAnalysis
 │   ├── agents/
 │   │   ├── orchestrator.py         # graphe LangGraph, mémoire, traiter_message()
+│   │   ├── intent_router.py        # routeur d'intentions (sans appel LLM)
 │   │   ├── state.py                # état partagé du graphe
 │   │   └── nodes.py                # étapes : analyser, clarifier, générer
 │   ├── services/

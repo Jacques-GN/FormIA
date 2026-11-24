@@ -12,12 +12,37 @@ import json
 
 from pydantic import ValidationError
 
+from app.agents.intent_router import Intention
 from app.agents.state import FormiaState
 from app.services import form_generator
 
 
 def analyser_demande(state: FormiaState) -> dict:
-    """Première étape de chaque tour : le LLM dit s'il manque des informations."""
+    """Première étape de chaque tour : le LLM dit s'il manque des informations.
+
+    L'intention du routeur peut court-circuiter cette étape pour éviter un
+    appel LLM inutile :
+    - HORS_SUJET : pas d'appel LLM, la demande n'est pas traitée.
+    - ANNULATION : on vide le formulaire en cours.
+    """
+    intention = state.get("intention")
+
+    if intention == Intention.HORS_SUJET:
+        return {
+            "questions": [],
+            "formulaire": {},
+            "tentatives": 0,
+            "erreur": "hors_sujet",
+        }
+
+    if intention == Intention.ANNULATION:
+        return {
+            "questions": [],
+            "formulaire": {},
+            "tentatives": 0,
+            "erreur": "",
+        }
+
     analyse = form_generator.analyze_request(state["historique"])
     return {
         "questions": analyse.questions,

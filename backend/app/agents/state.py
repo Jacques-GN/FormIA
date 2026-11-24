@@ -66,3 +66,7 @@ class FormiaState(TypedDict, total=False):
     # Dernière erreur de validation. Elle peut être renvoyée au LLM pour
     # qu'il corrige sa réponse à la tentative suivante.
     erreur: str
+
+    # Intention détectée par le routeur pour ce tour de conversation.
+    # Valeurs : voir app.agents.intent_router.Intention.
+    intention: str

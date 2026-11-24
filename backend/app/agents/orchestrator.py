@@ -8,6 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.agents import nodes
+from app.agents.intent_router import IntentRouter, Intention
 from app.agents.state import FormiaState
 
 # Nombre maximal de générations par message : évite une boucle sans fin
@@ -19,7 +20,14 @@ MAX_TENTATIVES = 2
 
 
 def apres_analyse(state: FormiaState) -> str:
-    """Des questions à poser ? Sinon, on génère le formulaire."""
+    """Des questions à poser ? Sinon, on génère le formulaire.
+
+    Sauf si l'intention est hors sujet ou annulation : on s'arrête sans
+    appeler le LLM.
+    """
+    intention = state.get("intention")
+    if intention in {Intention.HORS_SUJET, Intention.ANNULATION}:
+        return "terminer"
     return "clarifier" if state.get("questions") else "generer"
 
 
@@ -46,7 +54,11 @@ def construire_graphe():
     builder.add_conditional_edges(
         "analyser_demande",
         apres_analyse,
-        {"clarifier": "poser_questions", "generer": "generer_formulaire"},
+        {
+            "clarifier": "poser_questions",
+            "generer": "generer_formulaire",
+            "terminer": END,
+        },
     )
     builder.add_edge("poser_questions", END)
     builder.add_conditional_edges(
@@ -64,6 +76,9 @@ def construire_graphe():
 # Compilé UNE fois au chargement : sinon la mémoire serait perdue à chaque requête.
 graphe = construire_graphe()
 
+# Routeur d'intentions : instance unique, légère (aucun appel réseau).
+routeur = IntentRouter()
+
 
 def traiter_message(message: str, session_id: str) -> FormiaState:
     """Fait avancer la conversation d'un message et retourne l'état final.
@@ -75,6 +90,9 @@ def traiter_message(message: str, session_id: str) -> FormiaState:
         # operator.add : ce message est ajouté à l'historique déjà sauvegardé.
         "historique": [{"role": "user", "content": message}],
         "demande": message,
+        # Intention détectée pour ce tour : stockée dans l'état, exploitée
+        # par les nœuds et par routes.py pour adapter la réponse.
+        "intention": routeur.router(message).intention,
     }
     return graphe.invoke(entree, configuration)
 
