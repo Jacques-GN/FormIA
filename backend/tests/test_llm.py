@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.core.exceptions import MissingConfiguration
 from app.schemas.form import QuestionType
 from app.services import LLM, form_generator
 
@@ -72,7 +73,7 @@ def test_generate_completion_sends_compatible_request(monkeypatch):
 
 def test_generate_completion_requires_configuration():
     # La configuration vide vient de conftest.py : aucun appel réseau possible.
-    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
+    with pytest.raises(MissingConfiguration, match="LLM_API_KEY"):
         LLM.generate_completion(MESSAGES, system_prompt="Consignes")
 
 
@@ -146,3 +147,25 @@ def test_analyze_request_rejects_too_many_questions(monkeypatch):
 
     with pytest.raises(ValidationError):
         form_generator.analyze_request(MESSAGES)
+
+
+def test_l_historique_envoye_au_llm_est_borne(monkeypatch):
+    """Le coût d'un appel reste borné, même sur une très longue conversation."""
+    recu = {}
+
+    def faux_llm(messages, system_prompt):
+        recu["messages"] = messages
+        return '{"questions": []}'
+
+    monkeypatch.setattr(form_generator, "generate_completion", faux_llm)
+    historique = [
+        {"role": "user", "content": f"message-{index}"} for index in range(100)
+    ]
+
+    form_generator.analyze_request(historique)
+
+    envoyes = recu["messages"]
+    assert len(envoyes) == form_generator.MAX_HISTORY_MESSAGES
+    assert envoyes[0]["content"] == "message-0"  # le brief initial est conservé
+    assert envoyes[-1]["content"] == "message-99"  # les plus récents aussi
+    assert "message-50" not in [m["content"] for m in envoyes]

@@ -15,14 +15,22 @@ import secrets
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.agents.orchestrator import lire_etat, traiter_message
+from app.core.exceptions import (
+    GoogleError,
+    GoogleConnectionRequired,
+    InvalidRequest,
+    OperationPending,
+    ResourceNotFound,
+    VersionConflict,
+)
 from app.core.security import generate_oauth_state
 from app.integrations.google_forms import client as google_client
-from app.integrations.google_forms import oauth, token_store
+from app.integrations.google_forms import creation_store, oauth, token_store
 from app.schemas.form import Form
 
 router = APIRouter()
@@ -130,17 +138,13 @@ def google_callback(
 ) -> dict[str, str]:
     """Retour de Google : vérifie le « state », puis échange le code contre un jeton."""
     if error or not code or not state:
-        raise HTTPException(
-            status_code=400,
-            detail="La connexion à Google a été refusée ou est incomplète.",
+        raise InvalidRequest(
+            "La connexion à Google a été refusée ou est incomplète."
         )
 
     session_id = token_store.consume_state(state)  # usage unique
     if session_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Demande de connexion invalide ou expirée.",
-        )
+        raise InvalidRequest("Demande de connexion invalide ou expirée.")
 
     token = oauth.exchange_code_for_token(code)
     token_store.store_token(
@@ -154,30 +158,66 @@ def google_callback(
 
 @router.post("/forms/confirm")
 def confirm(request: ConfirmRequest) -> ConfirmResponse:
-    """Crée le formulaire dans Google, après confirmation de la version exacte."""
+    """Crée le formulaire dans Google, après confirmation de la version exacte.
+
+    Idempotent : une seconde confirmation identique renvoie le résultat déjà
+    obtenu sans rappeler Google. Si une création partielle a eu lieu, la
+    confirmation reprend sur le même formulaire.
+    """
     etat = lire_etat(request.session_id)
     if not etat.get("formulaire"):
-        raise HTTPException(
-            status_code=404,
-            detail="Aucun formulaire prêt pour cette session.",
-        )
+        raise ResourceNotFound("Aucun formulaire prêt pour cette session.")
 
     # On utilise la copie du SERVEUR : le client ne dicte jamais ce qui est créé.
     form = Form.model_validate(etat["formulaire"])
     if not secrets.compare_digest(empreinte_formulaire(form), request.form_hash):
-        raise HTTPException(
-            status_code=409,
-            detail="Le formulaire a changé depuis l'aperçu. Relisez-le puis confirmez.",
+        raise VersionConflict(
+            "Le formulaire a changé depuis l'aperçu. Relisez-le puis confirmez."
         )
+
+    record, status = creation_store.try_begin(request.session_id, request.form_hash)
+    if status == "completed":
+        return ConfirmResponse(
+            form_id=record.form_id or "",
+            responder_url=record.responder_url or "",
+            edit_url=record.edit_url or "",
+        )
+    if status == "pending":
+        raise OperationPending()
 
     token = token_store.get_token(request.session_id)
     if token is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Connexion à Google requise : ouvrez /auth/google/login.",
+        creation_store.mark_failed(
+            request.session_id, request.form_hash, "Connexion Google requise."
         )
+        raise GoogleConnectionRequired()
 
-    # L'empreinte vérifiée prouve que la version confirmée est celle-ci.
-    resultat = google_client.create_form(form, token, confirmed_form=form)
+    try:
+        resultat = google_client.create_form(
+            form,
+            token,
+            confirmed_form=form,
+            existing_form_id=record.form_id,
+            on_form_created=lambda form_id: creation_store.remember_form(
+                request.session_id, request.form_hash, form_id
+            ),
+        )
+    except google_client.PartialCreation as erreur:
+        # Le formulaire existe : la prochaine confirmation reprendra dessus.
+        creation_store.mark_retryable(
+            request.session_id, request.form_hash, str(erreur)
+        )
+        raise GoogleError(str(erreur)) from erreur
+    except Exception as erreur:
+        creation_store.mark_failed(request.session_id, request.form_hash, str(erreur))
+        raise
+
+    creation_store.complete(
+        request.session_id,
+        request.form_hash,
+        form_id=resultat["form_id"],
+        responder_url=resultat["responder_url"],
+        edit_url=resultat["edit_url"],
+    )
     token_store.discard_token(request.session_id)  # moindre privilège
     return ConfirmResponse(**resultat)

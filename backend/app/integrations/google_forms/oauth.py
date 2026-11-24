@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import settings
+from app.core.exceptions import GoogleError, MissingConfiguration
 
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -33,7 +34,10 @@ def build_authorization_url(state: str) -> str:
     if not state:
         raise ValueError("Le paramètre OAuth state est obligatoire.")
     if not settings.google_client_id or not settings.google_redirect_uri:
-        raise RuntimeError("La configuration OAuth Google est incomplète.")
+        raise MissingConfiguration(
+            "La configuration OAuth Google est incomplète (identifiant client "
+            "ou URI de redirection manquant)."
+        )
 
     query = urlencode(
         {
@@ -65,29 +69,41 @@ def exchange_code_for_token(
         and settings.google_client_secret
         and settings.google_redirect_uri
     ):
-        raise RuntimeError("La configuration OAuth Google est incomplète.")
-
-    with httpx.Client(
-        timeout=REQUEST_TIMEOUT_SECONDS,
-        transport=transport,
-    ) as client:
-        response = client.post(
-            TOKEN_URL,
-            # data= : Google attend un formulaire encodé, pas du JSON.
-            data={
-                "code": code,
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "redirect_uri": settings.google_redirect_uri,
-                "grant_type": "authorization_code",
-            },
+        raise MissingConfiguration(
+            "La configuration OAuth Google est incomplète (identifiant, secret "
+            "ou URI de redirection manquant)."
         )
-        response.raise_for_status()
 
-    data = response.json()
+    try:
+        with httpx.Client(
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            transport=transport,
+        ) as client:
+            response = client.post(
+                TOKEN_URL,
+                # data= : Google attend un formulaire encodé, pas du JSON.
+                data={
+                    "code": code,
+                    "client_id": settings.google_client_id,
+                    "client_secret": settings.google_client_secret,
+                    "redirect_uri": settings.google_redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+    except httpx.HTTPError as error:
+        raise GoogleError() from error
+
+    if response.status_code >= 400:
+        # Le code d'autorisation est à usage unique : on ne le relance pas.
+        raise GoogleError("Google a refusé l'échange du code d'autorisation.")
+
+    try:
+        data = response.json()
+    except ValueError as error:
+        raise GoogleError("La réponse de Google n'est pas exploitable.") from error
     access_token = data.get("access_token") if isinstance(data, dict) else None
     if not isinstance(access_token, str) or not access_token:
-        raise ValueError("La réponse de Google ne contient pas de jeton d'accès.")
+        raise GoogleError("La réponse de Google ne contient pas de jeton d'accès.")
 
     expires_in = data.get("expires_in")
     return {

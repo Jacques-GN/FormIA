@@ -15,6 +15,11 @@ seulement proposer, et c'est le schéma Pydantic qui décide si c'est valide.
 from app.schemas.form import Form, RequestAnalysis
 from app.services.LLM import generate_completion
 
+# Plafond d'historique envoyé au LLM : le coût doit rester borné même sur une
+# longue conversation. On garde le premier message (le brief initial) et les
+# plus récents ; l'état structuré du formulaire reste, lui, complet.
+MAX_HISTORY_MESSAGES = 20
+
 # Consignes de l'« analyste ». Le mot JSON y figure : certains fournisseurs
 # l'exigent quand response_format vaut json_object (voir LLM.py).
 ANALYSIS_PROMPT = """\
@@ -51,13 +56,20 @@ options. Les questions de texte ne doivent pas avoir d'options.
 """
 
 
+def _bounded_history(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Réduit l'historique envoyé au fournisseur sans perdre le brief initial."""
+    if len(messages) <= MAX_HISTORY_MESSAGES:
+        return messages
+    return [messages[0], *messages[-(MAX_HISTORY_MESSAGES - 1) :]]
+
+
 def analyze_request(messages: list[dict[str, str]]) -> RequestAnalysis:
     """Demande au LLM s'il manque des informations essentielles.
 
     Retourne une RequestAnalysis : questions vide = on peut générer.
     Lève une ValidationError si la réponse du LLM n'est pas conforme.
     """
-    response = generate_completion(messages, system_prompt=ANALYSIS_PROMPT)
+    response = generate_completion(_bounded_history(messages), system_prompt=ANALYSIS_PROMPT)
     return RequestAnalysis.model_validate_json(response)
 
 
@@ -80,5 +92,7 @@ def generate_form(messages: list[dict[str, str]], previous_error: str = "") -> F
             },
         ]
 
-    response = generate_completion(messages, system_prompt=GENERATION_PROMPT)
+    response = generate_completion(
+        _bounded_history(messages), system_prompt=GENERATION_PROMPT
+    )
     return Form.model_validate_json(response)

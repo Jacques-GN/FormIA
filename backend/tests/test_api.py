@@ -100,3 +100,24 @@ def test_chat_rejects_an_invalid_session_id():
     )
 
     assert response.status_code == 422
+
+
+def test_chat_never_creates_a_google_form(monkeypatch):
+    from app.integrations.google_forms import client as google_client
+
+    def interdit(*args, **kwargs):
+        raise AssertionError("La conversation ne doit jamais créer de formulaire.")
+
+    monkeypatch.setattr(google_client, "create_form", interdit)
+    formulaire = Form(
+        title="Tournoi",
+        questions=[Question(title="Nom", type=QuestionType.SHORT_TEXT)],
+    ).model_dump(mode="json")
+    monkeypatch.setattr(
+        routes, "traiter_message", lambda message, session_id: {"formulaire": formulaire}
+    )
+
+    response = client.post("/forms/chat", json={"message": "Un formulaire"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "form_ready"

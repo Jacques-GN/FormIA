@@ -77,6 +77,8 @@ def traiter_message(message: str, session_id: str) -> FormiaState:
         "demande": message,
     }
     return graphe.invoke(entree, configuration)
+
+
 def lire_etat(session_id: str) -> FormiaState:
     """Retourne l'état sauvegardé d'une session (vide si elle n'existe pas).
 
