@@ -35,6 +35,7 @@ def test_chat_returns_clarification_questions(monkeypatch):
     corps = response.json()
     assert corps["status"] == "clarification"
     assert corps["questions"] == ["Quel public ?"]
+    assert "Quel public ?" in corps["message"]
     assert corps["session_id"]  # créé par le serveur au premier message
 
 
@@ -54,6 +55,9 @@ def test_chat_returns_the_generated_form(monkeypatch):
     corps = response.json()
     assert corps["status"] == "form_ready"
     assert corps["form"]["title"] == "Tournoi"
+    # Le texte affiché est rendu par le serveur, pas rédigé par le LLM.
+    assert "1. Nom (réponse courte)" in corps["message"]
+    assert "Aucun formulaire n'a encore été créé" in corps["message"]
 
 
 def test_chat_hides_internal_errors_when_generation_fails(monkeypatch):

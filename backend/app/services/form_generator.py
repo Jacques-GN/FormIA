@@ -43,15 +43,28 @@ conforme à ce format :
   "questions": [
     {
       "title": "Intitulé de la question",
+      "description": "Précision facultative affichée sous la question",
       "type": "short_text",
       "required": false,
-      "options": []
+      "options": [],
+      "origin": "user",
+      "justification": ""
     }
   ]
 }
 Les types autorisés sont : short_text, paragraph, multiple_choice,
 checkboxes et dropdown. Les questions à choix doivent avoir au moins deux
 options. Les questions de texte ne doivent pas avoir d'options.
+
+Chaque question porte une origine :
+- "user" : l'utilisateur l'a demandée explicitement dans son brief.
+- "suggested" : tu la proposes pour atteindre l'objectif du brief. Dans ce cas,
+  "justification" explique en une phrase courte, dans la langue de
+  l'utilisateur, en quoi cette question sert cet objectif.
+Une question "suggested" sans justification est refusée.
+N'invente pas de besoin : ne marque "user" que ce qui figure dans le brief.
+Ne propose aucune question sur des données sensibles (santé, religion, opinions
+politiques, identité) sans nécessité explicite.
 Écris le formulaire dans la langue de l'utilisateur.
 """
 

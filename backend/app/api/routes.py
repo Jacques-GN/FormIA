@@ -32,6 +32,7 @@ from app.core.security import generate_oauth_state
 from app.integrations.google_forms import client as google_client
 from app.integrations.google_forms import creation_store, oauth, token_store
 from app.schemas.form import Form
+from app.services.proposal import render_clarification, render_proposal
 
 router = APIRouter()
 
@@ -64,6 +65,8 @@ class ChatResponse(BaseModel):
     questions: list[str] = Field(default_factory=list)
     form: Form | None = None
     form_hash: str | None = None  # à renvoyer pour confirmer CETTE version
+    # Texte déjà mis en forme par le serveur : le client l'affiche tel quel.
+    # Il ne provient jamais d'une rédaction libre du LLM.
     message: str | None = None
 
 
@@ -101,6 +104,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             session_id=session_id,
             status="clarification",
             questions=etat["questions"],
+            message=render_clarification(etat["questions"]),
         )
 
     if etat.get("formulaire"):
@@ -110,6 +114,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             status="form_ready",
             form=form,
             form_hash=empreinte_formulaire(form),
+            message=render_proposal(form),
         )
 
     # Message volontairement générique : le détail de l'erreur reste interne.

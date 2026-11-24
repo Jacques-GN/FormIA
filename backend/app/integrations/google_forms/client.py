@@ -51,7 +51,12 @@ class PartialCreation(GoogleError):
 
 
 def question_to_item(question: Question) -> dict:
-    """Traduit une Question de Formia en « élément » Google Forms."""
+    """Traduit une Question de Formia en « élément » Google Forms.
+
+    Seuls les champs que Google sait afficher sont envoyés. L'origine et la
+    justification restent côté FormIA : ce sont des informations de conception,
+    pas un contenu à publier dans le formulaire.
+    """
     if question.type in CHOICE_TYPES:
         kind = {
             "choiceQuestion": {
@@ -63,10 +68,14 @@ def question_to_item(question: Question) -> dict:
         # short_text -> paragraph False ; paragraph -> paragraph True.
         kind = {"textQuestion": {"paragraph": question.type == QuestionType.PARAGRAPH}}
 
-    return {
+    item = {
         "title": question.title,
         "questionItem": {"question": {"required": question.required, **kind}},
     }
+    if question.description:
+        # Champ facultatif de l'API : une chaîne vide serait refusée/inerte.
+        item["description"] = question.description
+    return item
 
 
 def form_to_requests(form: Form, *, first_question_index: int = 0) -> list[dict]:

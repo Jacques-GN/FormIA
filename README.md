@@ -37,7 +37,7 @@ modulaire construit avec Python, FastAPI, Pydantic et LangGraph.
   appels LLM sont relancés sur 429/5xx avec attente croissante et jitter.
 - L'historique envoyé au LLM est borné (20 messages, brief initial conservé) et
   chaque appel journalise durée, modèle, statut et tokens, jamais le contenu.
-- Les tests (62) simulent le LLM et Google : aucun appel réseau réel.
+- Les tests (71) simulent le LLM et Google : aucun appel réseau réel.
 
 ### Pas encore terminé
 
@@ -66,7 +66,8 @@ backend/
 │   │   └── nodes.py                # étapes : analyser, clarifier, générer
 │   ├── services/
 │   │   ├── form_generator.py       # consignes (prompts) et validation des réponses
-│   │   └── LLM.py                  # adaptateur HTTP compatible OpenAI
+│   │   ├── LLM.py                  # adaptateur HTTP compatible OpenAI
+│   │   └── proposal.py             # rendu texte déterministe de la proposition
 │   ├── integrations/google_forms/
 │   │   ├── client.py               # traduction Form -> Google Forms et création
 │   │   ├── creation_store.py       # suivi idempotent des créations, en RAM
@@ -184,6 +185,20 @@ service. La suite couvre notamment :
 En revanche, aucun test ne contacte réellement Google : le parcours complet chez
 Google reste à vérifier manuellement.
 
+## Le texte affiché est généré par le code
+
+Le LLM propose une structure ; ce texte est mis en mots par `services/proposal.py`,
+à partir du formulaire validé, et non rédigé librement par le modèle. L'utilisateur
+lit donc exactement ce qui sera confirmé, puis créé. Une proposition n'est jamais
+une validation.
+
+Chaque question porte une origine :
+- `user` : demandée explicitement par l'utilisateur dans son brief ;
+- `suggested` : proposée par FormIA pour atteindre l'objectif du brief, avec une
+  justification affichée (« Suggérée parce que : … »).
+Une suggestion sans justification est refusée par le schéma. Ces informations
+resteront côté FormIA : elles ne sont jamais envoyées à Google Forms.
+
 ## Compatibilité Google Forms
 
 | Type FormIA | Élément Google Forms | Création par l'API |
@@ -202,8 +217,10 @@ Google reste à vérifier manuellement.
 
 - La question Google Forms « Importer un fichier » n'est pas prise en charge par
   l'API Forms : FormIA ne la propose pas.
-- Le schéma ne gère ni sections, ni description par question, ni échelle, ni
-  date, ni validation conditionnelle.
+- Le schéma gère désormais la description par question, l'origine de chaque
+  question (demandée par vous / suggérée par FormIA) et sa justification pour
+  les suggestions. Le schéma ne gère pas encore : sections, échelle, date ni
+  validation conditionnelle.
 - Toute la mémoire (conversations, « state » OAuth, jetons Google, registre des
   créations) est locale au processus : pas de partage entre plusieurs workers,
   perte au redémarrage.

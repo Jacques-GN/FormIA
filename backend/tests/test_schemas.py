@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.form import Form, Question, QuestionType
+from app.schemas.form import Form, Question, QuestionOrigin, QuestionType
 
 # ---------- Cas qui doivent réussir ----------
 
@@ -29,6 +29,34 @@ def test_form_with_one_question_is_valid():
         questions=[{"title": "Nom complet", "type": "short_text"}],
     )
     assert form.title == "Inscription IA"
+
+
+def test_une_question_suggeree_doit_etre_justifiee():
+    with pytest.raises(ValidationError):
+        Question(
+            title="Âge ?",
+            type=QuestionType.SHORT_TEXT,
+            origin=QuestionOrigin.SUGGESTED,
+        )
+
+
+def test_une_justification_sans_origine_devient_une_suggestion():
+    question = Question.model_validate(
+        {
+            "title": "Âge ?",
+            "type": "short_text",
+            "justification": "pour adapter la taille des groupes",
+        }
+    )
+
+    assert question.origin is QuestionOrigin.SUGGESTED
+
+
+def test_une_question_demandee_n_exige_pas_de_justification():
+    question = Question(title="Nom", type=QuestionType.SHORT_TEXT)
+
+    assert question.origin is QuestionOrigin.USER
+    assert question.justification == ""
 
 
 # ---------- Cas qui doivent être refusés ----------
